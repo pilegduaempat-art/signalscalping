@@ -64,6 +64,7 @@ if "last_update" not in st.session_state:
 
 
 def main_loop():
+def main_loop():
     current_time = time.time()
     
     # Auto-refresh logic: update if refresh interval has passed or manual refresh was clicked
@@ -73,10 +74,27 @@ def main_loop():
         try:
             symbols = get_top_n_pairs_by_volatility(n=top_n, tf=timeframe)
             results = []
-            for s in symbols:
+            
+            # Progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for idx, s in enumerate(symbols):
+                # Update progress
+                progress = (idx + 1) / len(symbols)
+                progress_bar.progress(progress)
+                status_text.text(f"Processing {s}... ({idx + 1}/{len(symbols)})")
+                
                 # ensure symbol is in Binance futures format (e.g. BTCUSDT)
                 res = generate_recommendation(s, tf=timeframe)
                 results.append(res)
+                
+                # Add delay between symbols to avoid rate limit
+                time.sleep(0.5)  # 500ms delay between each symbol
+            
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
 
             df = pd.DataFrame(results)
             
@@ -89,6 +107,9 @@ def main_loop():
                 st.warning(f"⚠️ Failed to fetch data for {len(df_errors)} symbols")
                 with st.expander("Show errors"):
                     st.dataframe(df_errors[['symbol', 'error']])
+            
+            # ... rest of the code remains the same
+    current_time = time.time()
             
             # Show table only if we have valid data
             if len(df_valid) > 0:
