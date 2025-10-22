@@ -64,7 +64,6 @@ if "last_update" not in st.session_state:
 
 
 def main_loop():
-def main_loop():
     current_time = time.time()
     
     # Auto-refresh logic: update if refresh interval has passed or manual refresh was clicked
@@ -107,9 +106,6 @@ def main_loop():
                 st.warning(f"⚠️ Failed to fetch data for {len(df_errors)} symbols")
                 with st.expander("Show errors"):
                     st.dataframe(df_errors[['symbol', 'error']])
-            
-            # ... rest of the code remains the same
-    current_time = time.time()
             
             # Show table only if we have valid data
             if len(df_valid) > 0:
