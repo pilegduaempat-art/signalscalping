@@ -7,7 +7,14 @@ import pandas as pd
 import time
 from config import BINANCE_FUTURES_BASE
 
+from utils.cache import cached
 
+@cached(ttl=30)  # Cache for 30 seconds
+def fetch_24hr_ticker():
+    url = BINANCE_FUTURES_BASE + "/fapi/v1/ticker/24hr"
+    r = rate_limited_request(url)
+    return r.json()
+    
 # Rate limiting
 LAST_REQUEST_TIME = {}
 MIN_REQUEST_INTERVAL = 0.2  # 200ms between requests
