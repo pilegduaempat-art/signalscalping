@@ -79,63 +79,84 @@ def main_loop():
                 results.append(res)
 
             df = pd.DataFrame(results)
-            # Show table
-            with placeholder.container():
-                st.markdown(f"### Top {len(df)} volatile pairs analysis (updated {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC)")
-                cols = ["symbol", "price", "atr", "atr_pct", "funding", "oi", "cvd", "signal", "rr", "reason", "ts"]
-                display_df = df[cols].copy()
-                display_df["price"] = display_df["price"].map(lambda x: round(x, 6) if pd.notnull(x) else x)
-                display_df["atr"] = display_df["atr"].map(lambda x: round(x, 6) if pd.notnull(x) else x)
-                display_df["atr_pct"] = display_df["atr_pct"].map(lambda x: f"{x*100:.2f}%" if pd.notnull(x) else x)
-                display_df["funding"] = display_df["funding"].map(lambda x: f"{x:.6f}" if pd.notnull(x) else x)
-                display_df["oi"] = display_df["oi"].map(lambda x: f"{x:.2f}" if pd.notnull(x) else x)
-                st.dataframe(display_df, height=420)
+            
+            # Filter out rows with errors
+            df_valid = df[~df.get('error', pd.Series(dtype=bool)).notna()].copy()
+            df_errors = df[df.get('error', pd.Series(dtype=bool)).notna()].copy()
+            
+            # Show errors if any
+            if len(df_errors) > 0:
+                st.warning(f"⚠️ Failed to fetch data for {len(df_errors)} symbols")
+                with st.expander("Show errors"):
+                    st.dataframe(df_errors[['symbol', 'error']])
+            
+            # Show table only if we have valid data
+            if len(df_valid) > 0:
+                with placeholder.container():
+                    st.markdown(f"### Top {len(df_valid)} volatile pairs analysis (updated {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC)")
+                    cols = ["symbol", "price", "atr", "atr_pct", "funding", "oi", "cvd", "signal", "rr", "reason", "ts"]
+                    display_df = df_valid[cols].copy()
+                    display_df["price"] = display_df["price"].map(lambda x: round(x, 6) if pd.notnull(x) else x)
+                    display_df["atr"] = display_df["atr"].map(lambda x: round(x, 6) if pd.notnull(x) else x)
+                    display_df["atr_pct"] = display_df["atr_pct"].map(lambda x: f"{x*100:.2f}%" if pd.notnull(x) else x)
+                    display_df["funding"] = display_df["funding"].map(lambda x: f"{x:.6f}" if pd.notnull(x) else x)
+                    display_df["oi"] = display_df["oi"].map(lambda x: f"{x:.2f}" if pd.notnull(x) else x)
+                    st.dataframe(display_df, height=420)
 
-                # per-symbol expanders
+                    # per-symbol expanders (only for valid results)
+                    for r in results:
+                        if 'error' in r:
+                            continue  # Skip error results
+                            
+                        sym = r.get("symbol")
+                        with st.expander(f"{sym} – {r.get('signal')} – price {r.get('price')}"):
+                            st.write("**Signal:**", r.get("signal"))
+                            st.write("**Reason:**", r.get("reason"))
+                            st.write("**Price:**", r.get("price"))
+                            st.write("**Funding Rate:**", r.get("funding"))
+                            st.write("**Open Interest:**", r.get("oi"))
+                            st.write("**CVD (approx):**", r.get("cvd"))
+                            st.write("**ATR:**", r.get("atr"), "(abs) |", r.get("atr_pct"))
+                            if r.get("entry"):
+                                st.write(f"Entry: {r.get('entry'):.6f}, TP: {r.get('tp'):.6f}, SL: {r.get('sl'):.6f}, RRR: {r.get('rr')}")
+
+                            # plot last 100 candles
+                            try:
+                                kl = fetch_klines(sym, interval=timeframe, limit=200)
+                                fig = go.Figure(data=[go.Candlestick(
+                                    x=kl["open_time"], open=kl["open"], high=kl["high"], low=kl["low"], close=kl["close"],
+                                    name="Price"
+                                )])
+                                fig.update_layout(height=300, margin=dict(l=0, r=0, t=20, b=0))
+                                st.plotly_chart(fig, use_container_width=True)
+                            except Exception as e:
+                                st.write("Chart error:", e)
+
+                # Notifications: compare last_signals to current and send new (only for valid results)
                 for r in results:
-                    sym = r.get("symbol")
-                    with st.expander(f"{sym} – {r.get('signal')} – price {r.get('price')}"):
-                        st.write("**Signal:**", r.get("signal"))
-                        st.write("**Reason:**", r.get("reason"))
-                        st.write("**Price:**", r.get("price"))
-                        st.write("**Funding Rate:**", r.get("funding"))
-                        st.write("**Open Interest:**", r.get("oi"))
-                        st.write("**CVD (approx):**", r.get("cvd"))
-                        st.write("**ATR:**", r.get("atr"), "(abs) |", r.get("atr_pct"))
-                        if r.get("entry"):
-                            st.write(f"Entry: {r.get('entry'):.6f}, TP: {r.get('tp'):.6f}, SL: {r.get('sl'):.6f}, RRR: {r.get('rr')}")
-
-                        # plot last 100 candles
-                        try:
-                            kl = fetch_klines(sym, interval=timeframe, limit=200)
-                            fig = go.Figure(data=[go.Candlestick(
-                                x=kl["open_time"], open=kl["open"], high=kl["high"], low=kl["low"], close=kl["close"],
-                                name="Price"
-                            )])
-                            fig.update_layout(height=300, margin=dict(l=0, r=0, t=20, b=0))
-                            st.plotly_chart(fig, use_container_width=True)
-                        except Exception as e:
-                            st.write("Chart error:", e)
-
-            # Notifications: compare last_signals to current and send new
-            for r in results:
-                s = r.get("symbol")
-                sig = r.get("signal")
-                key = f"{s}:{sig}"
-                last = st.session_state["last_signals"].get(s)
-                # send when a new actionable signal (SCALP LONG/SHORT) appears or changes
-                if sig in ["SCALP LONG", "SCALP SHORT"]:
-                    if last != sig:
-                        st.session_state["last_signals"][s] = sig
-                        text = f"*Signal:* {sig}\n*Pair:* {s}\n*Price:* {r.get('price')}\n*TP:* {r.get('tp')}\n*SL:* {r.get('sl')}\n*RRR:* {r.get('rr')}\n*Reason:* {r.get('reason')}"
-                        st.write(f"🔔 New signal for {s}: {sig}")
-                        if notify:
-                            ok = send_telegram_message(text)
-                            st.write("Telegram notified:" , ok)
-                else:
-                    # clear previous if resolved
-                    if st.session_state["last_signals"].get(s) and sig == "WAIT":
-                        st.session_state["last_signals"].pop(s, None)
+                    if 'error' in r:
+                        continue  # Skip error results
+                        
+                    s = r.get("symbol")
+                    sig = r.get("signal")
+                    key = f"{s}:{sig}"
+                    last = st.session_state["last_signals"].get(s)
+                    # send when a new actionable signal (SCALP LONG/SHORT) appears or changes
+                    if sig in ["SCALP LONG", "SCALP SHORT"]:
+                        if last != sig:
+                            st.session_state["last_signals"][s] = sig
+                            text = f"*Signal:* {sig}\n*Pair:* {s}\n*Price:* {r.get('price')}\n*TP:* {r.get('tp')}\n*SL:* {r.get('sl')}\n*RRR:* {r.get('rr')}\n*Reason:* {r.get('reason')}"
+                            st.write(f"🔔 New signal for {s}: {sig}")
+                            if notify:
+                                ok = send_telegram_message(text)
+                                st.write("Telegram notified:" , ok)
+                    else:
+                        # clear previous if resolved
+                        if st.session_state["last_signals"].get(s) and sig == "WAIT":
+                            st.session_state["last_signals"].pop(s, None)
+            else:
+                with placeholder.container():
+                    st.error("❌ No valid data available. All symbols failed to fetch.")
 
         except Exception as e:
             st.error("Error fetching data: " + str(e))
